@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from collections import Counter
-
+import config
 
 def IOU(boxes_preds, boxes_labels, format="midpoints"):
 
@@ -113,29 +113,7 @@ def MAP(pred_boxes, true_boxes, iou_threshold=0.5, format="corners", num_classes
 
 
 def plot_image(image, boxes):
-
-    class_label = [
-        'aeroplane',
-        'bicycle',
-        'bird',
-        'boat',
-        'bottle',
-        'bus',
-        'car',
-        'cat',
-        'chair',
-        'cow',
-        'diningtable',
-        'dog',
-        'horse',
-        'motorbike',
-        'person',
-        'pottedplant',
-        'sheep',
-        'sofa',
-        'train',
-        'tvmonitor',
-    ]
+    class_label = config.COCO_LABELS if config.DATASET == 'COCO' else config.PASCAL_CLASSES
     cmap = plt.get_cmap("tab20b")
     colors = [cmap(i) for i in np.linspace(0, 1, len(class_label))]
     print(boxes)
@@ -269,19 +247,31 @@ def convert_cellboxes(predictions, grids=7):
     return converted_preds
 
 
-def cellboxes_to_boxes(out, grids=7):
-    converted_pred = convert_cellboxes(out).reshape(out.shape[0], grids * grids, -1)
-    converted_pred[..., 0] = converted_pred[..., 0].long()
-    all_bboxes = []
+def cellboxes_to_boxes(predictions,anchors, grid, is_preds=True):
+    BATCH_SIZE = predictions.shape[0]
+    num_anchors = len(anchors)
+    box_predictions = predictions[..., 1:5]
+    if is_preds:
+        anchors = anchors.reshape(1, len(anchors), 1, 1, 2)
+        box_predictions[..., 0:2] = torch.sigmoid(box_predictions[..., 0:2])
+        box_predictions[..., 2:] = torch.exp(box_predictions[..., 2:]) * anchors
+        scores = torch.sigmoid(predictions[..., 0:1])
+        best_class = torch.argmax(predictions[..., 5:], dim=-1).unsqueeze(-1)
+    else:
+        scores = predictions[..., 0:1]
+        best_class = predictions[..., 5:6]
 
-    for ex_idx in range(out.shape[0]):
-        bboxes = []
-
-        for bbox_idx in range(grids * grids):
-            bboxes.append([x.item() for x in converted_pred[ex_idx, bbox_idx, :]])
-        all_bboxes.append(bboxes)
-
-    return all_bboxes
+    cell_indices = (
+        torch.arange(grid)
+            .repeat(predictions.shape[0], 3, grid, 1)
+            .unsqueeze(-1)
+            .to(predictions.device)
+    )
+    x = 1 / grid * (box_predictions[..., 0:1] + cell_indices)
+    y = 1 / grid * (box_predictions[..., 1:2] + cell_indices.permute(0, 1, 3, 2, 4))
+    w_h = 1 / grid * box_predictions[..., 2:4]
+    converted_bboxes = torch.cat((best_class, scores, x, y, w_h), dim=-1).reshape(BATCH_SIZE, num_anchors * grid * grid, 6)
+    return converted_bboxes.tolist()
 
 def save_checkpoint(state, filename="yolov1.pth.tar"):
     print("=> Saving checkpoint")
