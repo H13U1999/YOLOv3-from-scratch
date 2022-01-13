@@ -1,16 +1,3 @@
-#
-#
-# import numpy as np
-# import pandas as pd
-# import os
-# csv_file = "/home/hieu/Documents/PASCAL_VOC/2examples.csv"
-# annotations = pd.read_csv(csv_file)
-# labels_path = "/home/hieu/Documents/PASCAL_VOC/labels"
-# l = os.path.join(labels_path, annotations.iloc[1, 1])
-# bb = np.roll(np.loadtxt(fname = l, delimiter = " ", ndmin = 2), -1, axis = 1).tolist()
-#
-# print(bb)
-
 import albumentations as A
 import cv2
 import torch
@@ -32,12 +19,15 @@ MAP_IOU_THRESH = 0.5
 NMS_IOU_THRESH = 0.45
 S = [IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8]
 PIN_MEMORY = True
-LOAD_MODEL = True
-SAVE_MODEL = True
+LOAD_MODEL = False
+SAVE_MODEL = False
+EVALUATION = False
 CHECKPOINT_FILE = "checkpoint.pth.tar"
 IMG_DIR = "/home/hieu/Documents/PASCAL_VOC/images"
 LABEL_DIR = "/home/hieu/Documents/PASCAL_VOC/labels"
-CSV_PATH = "/home/hieu/Documents/PASCAL_VOC/2examples.csv"
+TRAIN_CSV_PATH = "/home/hieu/Documents/PASCAL_VOC/2examples.csv"
+TEST_CSV_PATH = "/home/hieu/Documents/PASCAL_VOC/2examples.csv"
+VAL_CSV_PATH = "/home/hieu/Documents/PASCAL_VOC/2examples.csv"
 
 ANCHORS = [
     [(0.28, 0.22), (0.38, 0.48), (0.9, 0.78)],
@@ -71,7 +61,6 @@ train_transforms = A.Compose(
         A.Posterize(p=0.1),
         A.ToGray(p=0.1),
         A.ChannelShuffle(p=0.05),
-        A.Normalize(mean=[0, 0, 0], std=[1, 1, 1], max_pixel_value=255,),
         ToTensorV2(),
     ],
     bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
@@ -82,7 +71,6 @@ test_transforms = A.Compose(
         A.PadIfNeeded(
             min_height=IMAGE_SIZE, min_width=IMAGE_SIZE, border_mode=cv2.BORDER_CONSTANT
         ),
-        A.Normalize(mean=[0, 0, 0], std=[1, 1, 1], max_pixel_value=255,),
         ToTensorV2(),
     ],
     bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[]),

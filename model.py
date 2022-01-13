@@ -134,16 +134,3 @@ class YOLOV3(nn.Module):
         return layers
 
 
-
-def test():
-    num_classes = 20
-    model = YOLOV3(num_classes=num_classes)
-    img_size = 416
-    x = torch.randn((2, 3, img_size, img_size))
-    out = model(x)
-    assert out[0].shape == (2, 3, img_size//32, img_size//32, 5 + num_classes)
-    assert out[1].shape == (2, 3, img_size//16, img_size//16, 5 + num_classes)
-    assert out[2].shape == (2, 3, img_size//8, img_size//8, 5 + num_classes)
-
-# test()
-

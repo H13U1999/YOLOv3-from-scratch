@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from collections import Counter
 import config
+from dataset import ObjectDetectionDataset
+from torch.utils.data import Dataset, DataLoader
 
 def IOU(boxes_preds, boxes_labels, format="midpoints"):
 
@@ -273,15 +275,21 @@ def cellboxes_to_boxes(predictions,anchors, grid, is_preds=True):
     converted_bboxes = torch.cat((best_class, scores, x, y, w_h), dim=-1).reshape(BATCH_SIZE, num_anchors * grid * grid, 6)
     return converted_bboxes.tolist()
 
-def save_checkpoint(state, filename="yolov1.pth.tar"):
+def save_checkpoint(model, optimizer,filename="yolov1.pth.tar"):
     print("=> Saving checkpoint")
-    torch.save(state, filename)
+    checkpoint = {
+        "state_dict": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+    }
+    torch.save(checkpoint, filename)
 
-
-def load_checkpoint(checkpoint, model, optimizer):
+def load_checkpoint(checkpoint_file, model, optimizer, lr):
     print("=> Loading checkpoint")
+    checkpoint = torch.load(checkpoint_file, map_location=config.DEVICE)
     model.load_state_dict(checkpoint["state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer"])
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
 
 
 def iou_width_height(boxes1, boxes2):
@@ -293,3 +301,38 @@ def iou_width_height(boxes1, boxes2):
         boxes1[..., 0] * boxes1[..., 1] + boxes2[..., 0] * boxes2[..., 1] - intersection
     )
     return intersection / union
+def loaders():
+    train_set = ObjectDetectionDataset(config.TRAIN_CSV_PATH,
+                                          config.IMG_DIR,
+                                          config.LABEL_DIR,
+                                          config.ANCHORS,
+                                          config.IMAGE_SIZE,
+                                          grids=[config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8],
+                                          num_class=config.NUM_CLASSES,
+                                          transform= config.train_transforms)
+
+    test_set = ObjectDetectionDataset(config.TEST_CSV_PATH,
+                                       config.IMG_DIR,
+                                       config.LABEL_DIR,
+                                       config.ANCHORS,
+                                       config.IMAGE_SIZE,
+                                       grids = [config.IMAGE_SIZE//32, config.IMAGE_SIZE//16, config.IMAGE_SIZE//8],
+                                       num_class= config.NUM_CLASSES,
+                                       transform=config.test_transforms)
+
+    val_set = ObjectDetectionDataset(config.VAL_CSV_PATH,
+                                      config.IMG_DIR,
+                                      config.LABEL_DIR,
+                                      config.ANCHORS,
+                                      config.IMAGE_SIZE,
+                                      grids=[config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8],
+                                      num_class=config.NUM_CLASSES,
+                                      transform=config.test_transforms)
+
+    train_loader = DataLoader(dataset = train_set, batch_size = config.BATCH_SIZE,  num_workers=config.NUM_WORKERS, pin_memory=config.PIN_MEMORY, shuffle=True, drop_last=False)
+    test_loader = DataLoader(dataset = test_set, batch_size = config.BATCH_SIZE,  num_workers=config.NUM_WORKERS, pin_memory=config.PIN_MEMORY, shuffle=False, drop_last=False)
+    val_loader = DataLoader(dataset = val_set, batch_size = config.BATCH_SIZE,  num_workers=config.NUM_WORKERS, pin_memory=config.PIN_MEMORY, shuffle=False, drop_last=False)
+
+    return train_loader, test_loader, val_loader
+
+

@@ -71,34 +71,3 @@ class ObjectDetectionDataset(Dataset):
     def __len__(self):
         return len(self.annotations)
 
-
-def test():
-    anchors = config.ANCHORS
-
-    transform = config.train_transforms
-
-    dataset = ObjectDetectionDataset(
-        config.CSV_PATH,
-        config.IMG_DIR,
-        config.LABEL_DIR,
-        anchors=anchors,
-        grids= [13, 26, 52],
-        transform=transform,
-    )
-    S = [13, 26, 52]
-    scaled_anchors = torch.tensor(anchors) / (
-        1 / torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
-    )
-    loader = DataLoader(dataset=dataset, batch_size=1, shuffle=True)
-    for x, y in loader:
-        boxes = []
-
-        for i in range(y[0].shape[1]):
-            anchor = scaled_anchors[i]
-            boxes += cellboxes_to_boxes(
-                y[i], is_preds=False, grid=y[i].shape[2], anchors=anchor
-            )[0]
-        boxes = NMS(boxes, iou_threshold=1, prob_threshold=0.7, format="midpoints")
-        plot_image(x[0].permute(1, 2, 0).to("cpu"), boxes)
-
-test()
