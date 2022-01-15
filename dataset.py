@@ -4,8 +4,9 @@ from PIL import Image, ImageFile
 import os
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
-from utils import (iou_width_height as IOU, cellboxes_to_boxes, NMS,plot_image)
+from utils import  (cellboxes_to_boxes, NMS,plot_image,iou_width_height)
 import config
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class ObjectDetectionDataset(Dataset):
@@ -28,7 +29,6 @@ class ObjectDetectionDataset(Dataset):
         lab_path = os.path.join(self.labels_path, self.annotations.iloc[index, 1])
         bboxes = np.roll(np.loadtxt(fname = lab_path, delimiter = " ", ndmin = 2), -1, axis = 1).tolist()
         # format (x,y,w,h,class) for augmentations
-        print(bboxes)
         if self.transform:
             augmentations = self.transform(image = image, bboxes = bboxes)
             image = augmentations["image"]
@@ -39,15 +39,17 @@ class ObjectDetectionDataset(Dataset):
         # and each scale we have 3 anchor boxes predict each grid cell
 
         for box in bboxes:
-            iou_anchors = IOU(torch.tensor(box[2:4]),self.anchors)
+            iou_anchors = iou_width_height(torch.tensor(box[2:4]),self.anchors)
             anchor_indices = iou_anchors.argsort(descending = True, dim =0)
             x, y,width, height, class_label = box
             class_label = int(class_label)
             has_anchor = [False, False, False]
 
             for anchor_idx in anchor_indices:
-                scale_idx = anchor_idx // self.num_anchors_per_scale  # 0, 1, 2 which scale this anchor belongs 13? 26? 52?
-                anchor_on_scale = anchor_idx % self.num_anchors_per_scale  # 0, 1, 2 which anchor in the calculated scale
+                scale_idx = anchor_idx // self.num_anchors_per_scale
+                # 0, 1, 2 which scale this anchor belongs 13? 26? 52?
+                anchor_on_scale = anchor_idx % self.num_anchors_per_scale
+                # 0, 1, 2 which anchor in the calculated scale
                 grid = self.grids[scale_idx]
                 # convert to relative to the cell
 

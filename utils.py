@@ -4,10 +4,21 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from collections import Counter
 import config
-from dataset import ObjectDetectionDataset
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+
+
+def iou_width_height(boxes1, boxes2):
+    intersection = torch.min(boxes1[..., 0], boxes2[..., 0]) * torch.min(
+        boxes1[..., 1], boxes2[..., 1]
+    )
+    union = (
+        boxes1[..., 0] * boxes1[..., 1] + boxes2[..., 0] * boxes2[..., 1] - intersection
+    )
+    return intersection / union
 
 def IOU(boxes_preds, boxes_labels, format="midpoints"):
+    epsilon = 1e-6
 
     if format == "corners":
         box1_x1 = boxes_preds[..., 0:1]
@@ -38,12 +49,13 @@ def IOU(boxes_preds, boxes_labels, format="midpoints"):
 
     intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
     union = abs((box1_x2 - box1_x1) * (box1_y2 - box1_y1)) + abs(
-        (box2_x2 - box2_x1) * (box2_y2 - box2_y1)) - intersection
+        (box2_x2 - box2_x1) * (box2_y2 - box2_y1)) - intersection + epsilon
 
     return intersection / union
 
 
 def NMS(bbs, iou_threshold, prob_threshold, format="corners"):
+
     assert type(bbs) == list
     bbs = [box for box in bbs if box[1] > prob_threshold]  # delete uncertain bounding boxes
     bbs = sorted(bbs, key=lambda x: x[1], reverse=True)
@@ -140,7 +152,7 @@ def plot_image(image, boxes):
             (upper_left_x * width, upper_left_y * height),
             box[2] * width,
             box[3] * height,
-            linewidth=2,
+            linewidth=1.2,
             edgecolor = colors[predicted_class],
             facecolor = "none",
         )
@@ -149,7 +161,7 @@ def plot_image(image, boxes):
         plt.text(
             upper_left_x * width,
             upper_left_y * height,
-            s=class_label[int(predicted_class)],
+            s=class_label[predicted_class],
             color="white",
             verticalalignment="top",
             bbox={"color": colors[int(predicted_class)], "pad": 0},
@@ -162,28 +174,38 @@ def get_bboxes(
     model,
     iou_threshold,
     prob_threshold,
+    anchors,
     pred_format="cells",
-    format ="midpoints",
+    format="midpoints",
     device="cuda",
-    eva = False
 ):
-    all_pred_boxes = []
-    all_true_boxes = []
 
 
     # make sure model is in eval before get bboxes
     model.eval()
     train_idx = 0
+    all_pred_boxes = []
+    all_true_boxes = []
 
-    for batch_idx, (x, labels) in enumerate(loader):
+    for batch_idx, (x, labels) in enumerate(tqdm(loader)):
         x = x.to(device)
-        labels = labels.to(device)
+
         with torch.no_grad():
             predictions = model(x)
 
         batch_size = x.shape[0]
-        true_bboxes = cellboxes_to_boxes(labels)
-        bboxes = cellboxes_to_boxes(predictions)
+        bboxes = [[] for _ in range(batch_size)]
+        for i in range(len(config.GRIDS)):
+            S = predictions[i].shape[2]
+            anchor = torch.tensor([*anchors[i]]).to(device) * S
+            boxes_scale_i = cellboxes_to_boxes(predictions[i],anchor, grid= S, is_preds=True)
+
+            for idx, (box) in enumerate(boxes_scale_i):
+                bboxes[idx] += box
+
+        true_bboxes = cellboxes_to_boxes(
+            labels[2], anchor,grid=S, is_preds=False
+        )
 
         for idx in range(batch_size):
             nms_boxes = NMS(
@@ -207,17 +229,29 @@ def get_bboxes(
     return all_pred_boxes, all_true_boxes
 
 
-def plot_some_images(number_of_images, model, loader, iou_threshold, prob_threshold):
+def plot_some_images(model, loader, iou_threshold, prob_threshold,anchors):
     model.eval()
-    for x, y in loader:
-     x = x.to("cuda")
-     for idx in range(number_of_images):
-       bboxes = cellboxes_to_boxes(model(x))
-       bboxes = NMS(bboxes[idx], iou_threshold=0.5, prob_threshold=0.4, format="midpoints")
-       plot_image(x[idx].permute(1,2,0).to("cpu"), bboxes)
+    x, y = next(iter(loader))
+    x = x.to("cuda")
+    with torch.no_grad():
+        out = model(x)
+        bboxes = [[] for _ in range(x.shape[0])]
+        for i in range(3):
+            batch_size, A, S, _, _ = out[i].shape
+            anchor = anchors[i]
+            boxes_scale_i = cellboxes_to_boxes(
+                out[i], anchor, grid=S, is_preds=True
+            )
+            for idx, (box) in enumerate(boxes_scale_i):
+                bboxes[idx] += box
 
-    model.train()
+        model.train()
 
+    for i in range(batch_size):
+        nms_boxes = NMS(
+            bboxes[i], iou_threshold=iou_threshold, prob_threshold=prob_threshold, format="midpoints",
+        )
+        plot_image(x[i].permute(1, 2, 0).detach().cpu(), nms_boxes)
 
 
 def convert_cellboxes(predictions, grids=7):
@@ -292,21 +326,15 @@ def load_checkpoint(checkpoint_file, model, optimizer, lr):
         param_group["lr"] = lr
 
 
-def iou_width_height(boxes1, boxes2):
 
-    intersection = torch.min(boxes1[..., 0], boxes2[..., 0]) * torch.min(
-        boxes1[..., 1], boxes2[..., 1]
-    )
-    union = (
-        boxes1[..., 0] * boxes1[..., 1] + boxes2[..., 0] * boxes2[..., 1] - intersection
-    )
-    return intersection / union
 def loaders():
+    from dataset import ObjectDetectionDataset
+    g = [config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8]
+
     train_set = ObjectDetectionDataset(config.TRAIN_CSV_PATH,
                                           config.IMG_DIR,
                                           config.LABEL_DIR,
                                           config.ANCHORS,
-                                          config.IMAGE_SIZE,
                                           grids=[config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8],
                                           num_class=config.NUM_CLASSES,
                                           transform= config.train_transforms)
@@ -315,7 +343,6 @@ def loaders():
                                        config.IMG_DIR,
                                        config.LABEL_DIR,
                                        config.ANCHORS,
-                                       config.IMAGE_SIZE,
                                        grids = [config.IMAGE_SIZE//32, config.IMAGE_SIZE//16, config.IMAGE_SIZE//8],
                                        num_class= config.NUM_CLASSES,
                                        transform=config.test_transforms)
@@ -324,7 +351,6 @@ def loaders():
                                       config.IMG_DIR,
                                       config.LABEL_DIR,
                                       config.ANCHORS,
-                                      config.IMAGE_SIZE,
                                       grids=[config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8],
                                       num_class=config.NUM_CLASSES,
                                       transform=config.test_transforms)
@@ -336,3 +362,34 @@ def loaders():
     return train_loader, test_loader, val_loader
 
 
+def check_class_accuracy(model, loader, threshold):
+    model.eval()
+    tot_class_preds, correct_class = 0, 0
+    tot_noobj, correct_noobj = 0, 0
+    tot_obj, correct_obj = 0, 0
+
+    for idx, (x, y) in tqdm(enumerate(loader), total=len(loader)):
+        x = x.to(config.DEVICE)
+        with torch.no_grad():
+            out = model(x)
+
+        for i in range(3):
+            y[i] = y[i].to(config.DEVICE)
+            obj = y[i][..., 0] == 1 # in paper this is Iobj_i
+            noobj = y[i][..., 0] == 0  # in paper this is Iobj_i
+
+            correct_class += torch.sum(
+                torch.argmax(out[i][..., 5:][obj], dim=-1) == y[i][..., 5][obj]
+            )
+            tot_class_preds += torch.sum(obj)
+
+            obj_preds = torch.sigmoid(out[i][..., 0]) > threshold
+            correct_obj += torch.sum(obj_preds[obj] == y[i][..., 0][obj])
+            tot_obj += torch.sum(obj)
+            correct_noobj += torch.sum(obj_preds[noobj] == y[i][..., 0][noobj])
+            tot_noobj += torch.sum(noobj)
+
+    print(f"Class accuracy is: {(correct_class/(tot_class_preds+1e-16))*100:2f}%")
+    print(f"No obj accuracy is: {(correct_noobj/(tot_noobj+1e-16))*100:2f}%")
+    print(f"Obj accuracy is: {(correct_obj/(tot_obj+1e-16))*100:2f}%")
+    model.train()
