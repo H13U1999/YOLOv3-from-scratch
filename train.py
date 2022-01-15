@@ -76,7 +76,7 @@ def main():
     if config.EVALUATION:
         evaluation(test_loader, yolov3, optimizer, "yolov1.pth.tar", config.LEARNING_RATE, scaled_anchors)
     else:
-        map = 0.05
+        maps = 0.05
         for epoch in range(config.NUM_EPOCHS):
             train(train_loader, yolov3, optimizer, loss, scaler, scaled_anchors)
             if epoch > 0 and epoch % 3 == 0:
@@ -90,8 +90,10 @@ def main():
                                    iou_threshold=config.MAP_IOU_THRESH,
                                    format="midpoints",
                                    num_classes=config.NUM_CLASSES)
-                if map < mean_avg_pre:
+                if maps < mean_avg_pre:
                     save_checkpoint(yolov3, optimizer)
+                    maps = mean_avg_pre
+
                 print(f"Mean Average Precision for epoch {epoch}: {mean_avg_pre}")
 
         save_checkpoint(yolov3, optimizer,"FINAL.pth.tar")
